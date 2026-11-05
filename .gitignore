@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Environment / secrets
+.env
+.env.*
+
+# Generated caption artifacts
+.temp_captions/
+*_tanglish.ass
+*_tanglish.srt
+*_tanglish_captioned.mp4
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
