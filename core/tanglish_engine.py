@@ -41,7 +41,40 @@ COMMON_VOCAB = {
     'தெரியுமா': 'theriyuma',
     'கண்டிப்பா': 'kandippa',
     'ரொம்ப': 'romba',
-    'நன்றி': 'nandri'
+    'நன்றி': 'nandri',
+    'நேற்று': 'nethu',
+    'நேது': 'nethu',
+    'இன்று': 'innaiku',
+    'இன்றுக்கு': 'innaiku',
+    'இன்னுக்கு': 'innaiku',
+    'சுறுக்கமா': 'surukkama',
+    'சுறுக்கமாக': 'surukkama',
+    'சொன்னால்': 'sonna',
+    'சொன்னா': 'sonna',
+    'பழைய': 'pazhaya',
+    'பல்ல': 'pala',
+    'மேலும்': 'melum',
+    'இரண்டும்': 'irandum',
+    'சேர்ந்து': 'serndhu',
+    'தொடர்ந்து': 'thodarnthu',
+    'பாலோப்': 'follow',
+    'பாலோப்புண்ணுங்க': 'followpannunga',
+    'பண்ணுங்கள்': 'pannunga',
+    'பண்ணுங்க': 'pannunga',
+    'வேலை': 'velai',
+    'செய்யலாம்': 'seyyalaam',
+    'செயலாம்': 'seyyalaam',
+    'பார்க்கலாம்': 'paarkkalaam',
+    'பாக்கலாம்': 'paarkkalaam',
+    'வித்தியாசம்': 'vithiyaasam',
+    'வித்தியாசத்தை': 'vithiyaasathai',
+    'உதவும்': 'udhavum',
+    'சேமிக்கும்': 'semikkum',
+    'சேமிக்க': 'semikka',
+    'பகிரவும்': 'pagiravum',
+    'பகிரலாம்': 'pagiralaam',
+    'மற்றவருடன்': 'matravarudan',
+    'மற்றவர்களுடன்': 'matravargaludan',
 }
 
 BASE_CONSONANTS = {
@@ -66,15 +99,27 @@ def is_tamil_char(char: str) -> bool:
     """Checks if a character belongs to the Tamil Unicode block (0x0B80 - 0x0BFF)."""
     return any(0x0B80 <= ord(c) <= 0x0BFF for c in char)
 
+def is_pure_english_token(token: str) -> bool:
+    """
+    Checks if a token contains purely English/Latin characters, numbers, or symbols,
+    with ZERO Tamil Unicode characters.
+    """
+    clean = re.sub(r'^[^\w]+|[^\w]+$', '', token)
+    if not clean:
+        return True
+    if is_tamil_char(clean):
+        return False
+    return any(('a' <= c <= 'z' or 'A' <= c <= 'Z') for c in clean)
+
 def offline_transliterate_word(word: str) -> str:
     """
     Transliterates a single Tamil word to phonetic Tanglish.
-    Preserves punctuation, numbers, and English words safely.
+    Preserves English words, numbers, and punctuation 100% untouched.
     """
     if not word:
         return ""
 
-    # Split leading/trailing punctuation cleanly without affecting Unicode combining marks
+    # Split leading/trailing punctuation cleanly
     prefix = ""
     suffix = ""
     w = word
@@ -89,11 +134,16 @@ def offline_transliterate_word(word: str) -> str:
     if not core:
         return word
 
+    # CRITICAL: If the word contains no Tamil characters (already English/Latin/numeric),
+    # preserve it 100% exactly as-is. NEVER translate English to Tamil.
+    if not is_tamil_char(core):
+        return prefix + core + suffix
+
     # Check common dictionary first for natural colloquial spelling
     if core in COMMON_VOCAB:
         return prefix + COMMON_VOCAB[core] + suffix
 
-    if not tamil or not is_tamil_char(core):
+    if not tamil:
         return word
 
     try:
@@ -140,12 +190,12 @@ def offline_transliterate_word(word: str) -> str:
         return prefix + res_str + suffix
 
     except Exception:
-        # Failsafe: return word as-is rather than crashing
         return word
 
 def offline_transliterate_text(text: str) -> str:
     """
-    Transliterates a sentence or phrase of Tamil to Tanglish safely.
+    Transliterates a sentence of Tamil to Tanglish safely,
+    guaranteeing English words remain in English.
     """
     if not text:
         return ""
@@ -153,83 +203,14 @@ def offline_transliterate_text(text: str) -> str:
     converted_words = [offline_transliterate_word(w) for w in words]
     return " ".join(converted_words)
 
-def gemini_transliterate_batch(texts: List[str]) -> List[str]:
-    """
-    Uses Gemini API to convert Tamil sentences into natural, colloquial Tanglish.
-    Includes automatic retries for transient 503 spikes and seamless fallback to offline engine.
-    """
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        logger.info("No GEMINI_API_KEY found. Using high-speed offline transliterator.")
-        return [offline_transliterate_text(t) for t in texts]
-
-    prompt = f"""You are an expert Tamil-to-Tanglish subtitle transliterator.
-Convert each of the following spoken Tamil subtitle segments into natural, modern, colloquial Tanglish (Tamil phonetically written in English Latin alphabet, exactly like how people text and read on social media, e.g., 'Vanakkam nanbargale', 'epdi irukkeenga', 'innaiku namma paaka porom').
-
-STRICT RULES:
-1. Do NOT translate into English meaning. For example, 'வணக்கம்' must become 'Vanakkam', NOT 'Hello'.
-2. Keep existing English loanwords in English (e.g., 'video', 'AI', 'subscribe', 'channel').
-3. You MUST return a JSON list of strings with EXACTLY {len(texts)} elements, matching the input order 1-to-1.
-4. Capitalize appropriately for subtitles.
-
-Input Tamil lines:
-{json.dumps(texts, ensure_ascii=False)}
-"""
-
-    candidate_models = ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-flash-latest"]
-
-    try:
-        import google.genai as genai
-        client = genai.Client()
-
-        response_text = None
-        for model_name in candidate_models:
-            for attempt in range(2):
-                try:
-                    response = client.models.generate_content(
-                        model=model_name,
-                        contents=prompt,
-                        config=dict(response_mime_type="application/json")
-                    )
-                    if response and response.text:
-                        response_text = response.text.strip()
-                        break
-                except Exception as me:
-                    err_msg = str(me)
-                    if "404" in err_msg or "not found" in err_msg.lower():
-                        break
-                    if "503" in err_msg and attempt == 0:
-                        time.sleep(1.2)
-                        continue
-                    break
-
-            if response_text:
-                break
-
-        if response_text:
-            parsed = json.loads(response_text)
-            if isinstance(parsed, list) and len(parsed) == len(texts):
-                return [str(p).strip() for p in parsed]
-            elif isinstance(parsed, dict) and "subtitles" in parsed and len(parsed["subtitles"]) == len(texts):
-                return [str(p).strip() for p in parsed["subtitles"]]
-
-    except Exception as e:
-        logger.warning(f"Gemini API conversion encountered an issue ({e}). Using offline phonetic engine.")
-
-    # Always fallback cleanly to offline engine
-    return [offline_transliterate_text(t) for t in texts]
-
 def gemini_transliterate_words_batch(word_lists: List[List[str]]) -> Optional[List[Optional[List[str]]]]:
     """
-    Word-aligned Gemini transliteration.
+    Word-aligned Gemini transliteration with Strict Language Preservation.
 
-    Returns one Tanglish word per input Tamil word (same order, same count) so
-    every displayed word can carry its own Whisper acoustic timestamp.  This is
-    what makes the highlight follow the actual voice instead of drifting.
-
-    Returns None when the API is unavailable / failed.  Individual segments that
-    violate the 1:1 word-count contract are returned as None so the caller can
-    fall back to the offline per-word engine for just those segments.
+    Rules enforced:
+    1. Tamil words -> Tanglish (phonetic Latin spelling)
+    2. English words -> PRESERVED 100% in original English spelling (NEVER translated to Tamil)
+    3. Technical terms, product names, programming languages -> PRESERVED in English
     """
     if not word_lists:
         return []
@@ -238,27 +219,27 @@ def gemini_transliterate_words_batch(word_lists: List[List[str]]) -> Optional[Li
     if not api_key:
         return None
 
-    prompt = f"""You are an expert Tamil-to-Tanglish subtitle transliterator.
-You receive a JSON object where each element of "segments" is a list of Tamil words.
-
-For EACH segment, transliterate EVERY Tamil word individually into natural,
-colloquial Tanglish (Tamil spoken words written phonetically in Latin letters,
-e.g. 'வணக்கம்' -> 'Vanakkam', 'நண்பர்களே' -> 'nanbargale', 'இன்னைக்கு' -> 'innaiku').
+    prompt = f"""You are an expert Tamil-to-Tanglish transliteration engine, NOT a translation engine.
+Your task is to convert Tamil-language speech into natural Romanized Tanglish.
 
 STRICT RULES:
-1. Do NOT translate meaning into English. 'வணக்கம்' -> 'Vanakkam', NOT 'Hello'.
-2. Keep existing English loanwords in English (e.g. 'video', 'AI', 'subscribe', 'channel').
-3. Each output inner list MUST contain EXACTLY the same number of words as the
-   corresponding input inner list, in the same order. Never merge, split, add or
-   drop words — this is critical for audio sync.
-4. Keep any punctuation that is attached to a word.
-5. Return ONLY a JSON array of arrays of strings.
+1. Convert Tamil words into Tanglish (e.g. 'வணக்கம்' -> 'Vanakkam', 'நண்பர்களே' -> 'nanbargale').
+2. PRESERVE English words in their original English spelling.
+3. NEVER translate English words into Tamil meanings.
+   - 'Happy' MUST remain 'Happy', NEVER translate to 'Sandhosam'.
+   - 'Good morning' MUST remain 'Good morning', NEVER translate to 'Kaalai vanakkam'.
+   - 'project' MUST remain 'project', NEVER translate to 'thittam'.
+4. Preserve programming terminology, technical vocabulary, and product names:
+   Python, GitHub, Git, API, application, software, project, create, develop, install, online, database, code.
+5. Mixed Tamil-English sentences must preserve English words while transliterating Tamil words:
+   'Naan happy ah irukken' -> 'Naan happy ah irukken'
+6. Return a JSON object with a single key "segments": a list of word lists with EXACTLY the same number of words in the exact same order.
 
-Input:
+Input segments:
 {json.dumps({"segments": word_lists}, ensure_ascii=False)}
 """
 
-    candidate_models = ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-flash-latest"]
+    candidate_models = ["gemini-3.5-flash", "gemini-3.8-flash", "gemini-flash-latest", "gemini-2.5-flash"]
 
     try:
         import google.genai as genai
@@ -281,45 +262,53 @@ Input:
                     if "404" in err_msg or "not found" in err_msg.lower():
                         break
                     if "503" in err_msg and attempt == 0:
-                        time.sleep(1.2)
+                        time.sleep(1.0)
                         continue
                     break
+
             if response_text:
                 break
 
         if response_text:
             parsed = json.loads(response_text)
+            raw_segments = None
             if isinstance(parsed, dict) and "segments" in parsed:
-                parsed = parsed["segments"]
-            if isinstance(parsed, list) and len(parsed) == len(word_lists):
-                aligned: List[Any] = []
-                for src_words, out_words in zip(word_lists, parsed):
-                    if not isinstance(out_words, list) or len(out_words) != len(src_words):
+                raw_segments = parsed["segments"]
+            elif isinstance(parsed, list):
+                raw_segments = parsed
+
+            if raw_segments and len(raw_segments) == len(word_lists):
+                aligned = []
+                for in_words, out_words in zip(word_lists, raw_segments):
+                    if not isinstance(out_words, list) or len(out_words) != len(in_words):
                         aligned.append(None)
                         continue
-                    cleaned = [str(w).strip() for w in out_words]
+
+                    cleaned = []
+                    for in_w, out_w in zip(in_words, out_words):
+                        # SAFETY GUARD: If input word was already pure English, NEVER let LLM translate it!
+                        if is_pure_english_token(in_w):
+                            cleaned.append(in_w)
+                        else:
+                            cleaned.append(str(out_w).strip())
+
                     if any(not w for w in cleaned):
                         aligned.append(None)
                     else:
                         aligned.append(cleaned)
                 return aligned
+
     except Exception as e:
         logger.warning(f"Gemini word-level conversion failed ({e}). Using offline phonetic engine.")
 
     return None
-
 
 def _build_timed_words(
     words: List[str],
     whisper_words: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
     """
-    Pair an authoritative word list with Whisper's acoustic timestamps.
-
-    When counts match we get exact 1:1 timings.  Otherwise the words are
-    distributed across the acoustic anchor points so the displayed word list and
-    the timed word list are always identical (the highlight can never point at a
-    word that isn't shown).
+    Pair authoritative words with Whisper's acoustic timestamps.
     """
     if not words or not whisper_words:
         return []
@@ -339,7 +328,7 @@ def _build_timed_words(
             result.append({"word": word, "start": round(start, 3), "end": round(end, 3)})
         return result
 
-    # N:M — interpolate across acoustic anchors (start of each spoken word + end)
+    # N:M — interpolate across acoustic anchors
     anchors = [w["start"] for w in whisper_words] + [whisper_words[-1]["end"]]
     for k in range(1, len(anchors)):
         if anchors[k] < anchors[k - 1]:
@@ -367,17 +356,12 @@ def _build_timed_words(
         result.append({"word": word, "start": round(start, 3), "end": round(end, 3)})
     return result
 
-
 def convert_segments_to_tanglish(segments: List[Dict[str, Any]], batch_size: int = 15) -> List[Dict[str, Any]]:
     """
-    Converts all segments to Tanglish while guaranteeing that the exact words
-    shown in the captions are the same words that carry Whisper's acoustic
-    timestamps.
-
-    This is the key to correct word-by-word highlighting: the previous version
-    transliterated whole sentences (so Gemini could split/merge words) and then
-    discarded the precise per-word timings whenever the word count differed,
-    causing the highlight to lag/lead the voice.
+    Converts all segments to Tanglish with:
+    1. Language Preservation: English words stay strictly in English
+    2. Complete Speech Coverage: Processes every detected segment
+    3. 1:1 acoustic timestamp matching for word highlight
     """
     if not segments:
         return []
@@ -392,13 +376,16 @@ def convert_segments_to_tanglish(segments: List[Dict[str, Any]], batch_size: int
 
         for seg, tamil_words, tanglish_words in zip(batch, tamil_word_lists, aligned):
             if tanglish_words is None:
+                # Use offline transliterator with English token preservation
                 tanglish_words = [offline_transliterate_word(w) for w in tamil_words]
 
-            # ASS override delimiters must not leak into caption text
+            # Enforce English preservation safety check
+            for idx, orig_w in enumerate(tamil_words):
+                if is_pure_english_token(orig_w):
+                    tanglish_words[idx] = orig_w
+
             tanglish_words = [w.replace("{", "(").replace("}", ")") for w in tanglish_words]
 
-            # The joined sentence is exactly the same words we time below,
-            # so SRT/preview and the burned highlight always agree.
             seg["tanglish"] = " ".join(tanglish_words)
 
             timed = _build_timed_words(tanglish_words, seg.get("words", []))

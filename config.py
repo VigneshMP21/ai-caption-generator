@@ -8,22 +8,24 @@ BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
 FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
 
 # ---------------------------------------------------------------------------
-# Whisper transcription settings (Optimized for High Accuracy & Speed)
+# Whisper transcription settings (Complete Speech Coverage & High Speed)
 # ---------------------------------------------------------------------------
 # "small" is the sweet spot for Tamil speech recognition
-WHISPER_MODEL_SIZE    = "small"   # tiny | base | small | medium
-WHISPER_DEVICE        = "cpu"
-WHISPER_COMPUTE_TYPE  = "int8"
-WHISPER_CPU_THREADS   = max(1, os.cpu_count() or 4)  # Utilize all available CPU cores
-WHISPER_BEAM_SIZE     = 1                            # Greedy decoding (6x faster than beam_size=5)
-WHISPER_TEMPERATURE   = 0.0                          # Deterministic, stable transcription
+WHISPER_MODEL_SIZE           = "small"   # tiny | base | small | medium
+WHISPER_DEVICE               = "cpu"
+WHISPER_COMPUTE_TYPE         = "int8"
+WHISPER_CPU_THREADS          = max(1, os.cpu_count() or 4)  # Utilize all available CPU cores
+WHISPER_BEAM_SIZE            = 1                            # Greedy decoding (fast inference)
+WHISPER_TEMPERATURE          = 0.0                          # Deterministic transcription
+WHISPER_VAD_FILTER           = True                         # Silero VAD splits speech at genuine silences
+WHISPER_MIN_SILENCE_MS       = 500                          # Splits speech chunks when silence >= 500ms (prevents 30s window drops)
 
 # ---------------------------------------------------------------------------
 # Video encoding settings (Optimized for Universal Playback & High Speed)
 # ---------------------------------------------------------------------------
-# "veryfast" provides ~2.1x faster encoding over "fast" while preserving H.264 High Profile visual quality
-FFMPEG_PRESET         = "veryfast"
-FFMPEG_CRF            = 20        # Visually lossless/near-lossless quality target
+# "veryfast" provides fast encoding while preserving H.264 High Profile visual quality
+FFMPEG_PRESET                = "veryfast"
+FFMPEG_CRF                   = 20        # Visually lossless/near-lossless quality target
 
 # ---------------------------------------------------------------------------
 # Caption style
